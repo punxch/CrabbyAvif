@@ -56,11 +56,9 @@ fn main() -> Result<(), String> {
         println!("cargo:rustc-link-search={}", abs_object_dir.display());
         println!("cargo:rustc-link-lib=static=dav1d");
         
-        // On Windows, we may need to link against additional libraries
-        if cfg!(target_os = "windows") {
+        // On Windows with MSVC toolchain, we may need to link against additional libraries
+        if cfg!(target_os = "windows") && cfg!(target_env = "msvc") {
             println!("cargo:rustc-link-lib=dylib=msvcrt");
-            println!("cargo:rustc-link-lib=dylib=mingw32");
-            println!("cargo:rustc-link-lib=dylib=gcc");
         }
         
         let version_dir = PathBuf::from(&abs_library_dir)

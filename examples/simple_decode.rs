@@ -1,6 +1,4 @@
 use image::ImageReader;
-use std::fs::File;
-use std::io::Read;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = "bar.avif";

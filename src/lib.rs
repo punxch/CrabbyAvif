@@ -364,6 +364,49 @@ pub enum AvifError {
     InvalidToneMappedImage(String),
 }
 
+use std::fmt;
+
+impl fmt::Display for AvifError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AvifError::Ok => write!(f, "Ok"),
+            AvifError::UnknownError(msg) => write!(f, "Unknown error: {}", msg),
+            AvifError::InvalidFtyp => write!(f, "Invalid ftyp"),
+            AvifError::NoContent => write!(f, "No content"),
+            AvifError::NoYuvFormatSelected => write!(f, "No YUV format selected"),
+            AvifError::ReformatFailed => write!(f, "Reformat failed"),
+            AvifError::UnsupportedDepth => write!(f, "Unsupported depth"),
+            AvifError::EncodeColorFailed => write!(f, "Encode color failed"),
+            AvifError::EncodeAlphaFailed => write!(f, "Encode alpha failed"),
+            AvifError::BmffParseFailed(msg) => write!(f, "BMFF parse failed: {}", msg),
+            AvifError::MissingImageItem => write!(f, "Missing image item"),
+            AvifError::DecodeColorFailed => write!(f, "Decode color failed"),
+            AvifError::DecodeAlphaFailed => write!(f, "Decode alpha failed"),
+            AvifError::ColorAlphaSizeMismatch => write!(f, "Color and alpha size mismatch"),
+            AvifError::IspeSizeMismatch => write!(f, "ISPE size mismatch"),
+            AvifError::NoCodecAvailable => write!(f, "No codec available"),
+            AvifError::NoImagesRemaining => write!(f, "No images remaining"),
+            AvifError::InvalidExifPayload => write!(f, "Invalid EXIF payload"),
+            AvifError::InvalidImageGrid(msg) => write!(f, "Invalid image grid: {}", msg),
+            AvifError::InvalidCodecSpecificOption => write!(f, "Invalid codec specific option"),
+            AvifError::TruncatedData => write!(f, "Truncated data"),
+            AvifError::IoNotSet => write!(f, "IO not set"),
+            AvifError::IoError => write!(f, "IO error"),
+            AvifError::WaitingOnIo => write!(f, "Waiting on IO"),
+            AvifError::InvalidArgument => write!(f, "Invalid argument"),
+            AvifError::NotImplemented => write!(f, "Not implemented"),
+            AvifError::OutOfMemory => write!(f, "Out of memory"),
+            AvifError::CannotChangeSetting => write!(f, "Cannot change setting"),
+            AvifError::IncompatibleImage => write!(f, "Incompatible image"),
+            AvifError::EncodeGainMapFailed => write!(f, "Encode gain map failed"),
+            AvifError::DecodeGainMapFailed => write!(f, "Decode gain map failed"),
+            AvifError::InvalidToneMappedImage(msg) => write!(f, "Invalid tone mapped image: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for AvifError {}
+
 pub type AvifResult<T> = Result<T, AvifError>;
 
 #[repr(i32)]
@@ -579,4 +622,76 @@ pub fn codec_versions() -> String {
         codecs::libjxl::Libjxl::version(),
     ];
     versions.join(", ")
+}
+
+/// Represents a decoded AVIF image
+#[derive(Debug)]
+pub struct AvifImage {
+    /// The raw pixel data
+    pub data: Vec<u8>,
+    /// Width of the image
+    pub width: u32,
+    /// Height of the image
+    pub height: u32,
+    /// Number of bytes per pixel
+    pub bytes_per_pixel: usize,
+}
+
+/// Decode AVIF image from buffer
+pub fn decode(buffer: &[u8]) -> Result<AvifImage, AvifError> {
+    let mut decoder = decoder::Decoder::default();
+    decoder.set_io_vec(buffer.to_vec());
+    decoder.parse()?;
+    
+    // Get the first image
+    decoder.nth_image(0)?;
+    
+    if let Some(image) = decoder.image() {
+        // Convert to RGB format
+        let width = image.width;
+        let height = image.height;
+        
+        // Create a new RGB image
+        let mut rgb_image = reformat::rgb::Image {
+            width,
+            height,
+            depth: 8,
+            format: reformat::rgb::Format::Rgb,
+            chroma_upsampling: reformat::rgb::ChromaUpsampling::Automatic,
+            chroma_downsampling: reformat::rgb::ChromaDownsampling::Automatic,
+            premultiply_alpha: false,
+            is_float: false,
+            max_threads: 1,
+            pixels: None,
+            row_bytes: 0,
+        };
+        
+        // Allocate memory for the RGB image
+        rgb_image.allocate()?;
+        
+        // Convert YUV to RGB
+        reformat::rgb_impl::yuv_to_rgb_any(
+            image,
+            &mut rgb_image,
+            reformat::rgb::AlphaMultiplyMode::NoOp,
+        )?;
+        
+        // Extract the pixel data
+        let data = match rgb_image.pixels {
+            Some(pixels) => match pixels {
+                utils::pixels::Pixels::Buffer(buffer) => buffer,
+                _ => return Err(AvifError::ReformatFailed),
+            },
+            None => return Err(AvifError::NoContent),
+        };
+        
+        Ok(AvifImage {
+            data,
+            width,
+            height,
+            bytes_per_pixel: 3,
+        })
+    } else {
+        Err(AvifError::NoContent)
+    }
 }

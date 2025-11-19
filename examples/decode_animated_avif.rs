@@ -1,4 +1,4 @@
-use crabbyavif::{decode, AvifImage};
+use crabby_avif::{decode, AvifImage};
 use image::ImageReader;
 use std::fs::File;
 use std::io::Read;
