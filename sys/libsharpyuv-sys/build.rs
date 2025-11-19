@@ -49,16 +49,27 @@ fn main() -> Result<(), String> {
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let abs_library_dir = PathBuf::from(&project_root).join("libwebp");
     let abs_object_dir = PathBuf::from(&abs_library_dir).join(build_dir);
-    let library_file = PathBuf::from(&abs_object_dir).join(if cfg!(target_os = "windows") {
-        "sharpyuv.lib"
-    } else {
-        "libsharpyuv.a"
-    });
+    let library_file = PathBuf::from(&abs_object_dir).join("libsharpyuv.a");
     let mut include_paths: Vec<String> = Vec::new();
     if Path::new(&library_file).exists() {
         println!("cargo:rustc-link-lib=static=sharpyuv");
         println!("cargo:rustc-link-search={}", abs_object_dir.display());
+        
+        // On Windows, we may need to link against additional libraries
+        if cfg!(target_os = "windows") {
+            println!("cargo:rustc-link-lib=dylib=msvcrt");
+            println!("cargo:rustc-link-lib=dylib=mingw32");
+            println!("cargo:rustc-link-lib=dylib=gcc");
+        }
+        
+        // Include both the libwebp directory and the sharpyuv subdirectory
         include_paths.push(format!("-I{}", abs_library_dir.display()));
+        include_paths.push(format!("-I{}/sharpyuv", abs_library_dir.display()));
+        
+        // Print debug information
+        println!("cargo:warning=Library file exists: {}", Path::new(&library_file).exists());
+        println!("cargo:warning=Include paths: {:?}", include_paths);
+        println!("cargo:warning=Library file: {:?}", library_file);
     } else {
         match pkg_config::Config::new().probe("libsharpyuv") {
             Ok(library) => {

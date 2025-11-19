@@ -69,6 +69,7 @@ cbindgen = "0.26.0"
 
 [features]
 default = ["dav1d", "libyuv", "png", "jpeg", "gif", "sharpyuv"]
+# default = ["dav1d", "png", "jpeg", "gif"]
 capi = []
 dav1d = ["dep:libc", "dep:dav1d-sys"]
 libgav1 = ["dep:libgav1-sys"]

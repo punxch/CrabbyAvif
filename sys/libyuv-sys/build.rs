@@ -18,10 +18,10 @@ use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
-fn path_buf(inputs: &[&str]) -> PathBuf {
-    let path: PathBuf = inputs.iter().collect();
-    path
-}
+// fn path_buf(inputs: &[&str]) -> PathBuf {
+//     let path: PathBuf = inputs.iter().collect();
+//     path
+// }
 
 fn main() -> Result<(), String> {
     println!("cargo:rerun-if-changed=build.rs");
@@ -52,18 +52,30 @@ fn main() -> Result<(), String> {
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let abs_library_dir = PathBuf::from(&project_root).join("libyuv");
     let abs_object_dir = PathBuf::from(&abs_library_dir).join(build_dir);
-    let library_file = PathBuf::from(&abs_object_dir).join(if cfg!(target_os = "windows") {
-        "yuv.lib"
-    } else {
-        "libyuv.a"
-    });
+    let library_file = PathBuf::from(&abs_object_dir).join("libyuv.a");
     let extra_includes_str;
     let custom_error;
     if Path::new(&library_file).exists() {
         println!("cargo:rustc-link-lib=static=yuv");
         println!("cargo:rustc-link-search={}", abs_object_dir.display());
-        let version_dir = PathBuf::from(&abs_library_dir).join(path_buf(&["include"]));
-        extra_includes_str = format!("-I{}", version_dir.display());
+        
+        // On Windows, we may need to link against additional libraries
+        if cfg!(target_os = "windows") {
+            println!("cargo:rustc-link-lib=dylib=msvcrt");
+            println!("cargo:rustc-link-lib=dylib=mingw32");
+            println!("cargo:rustc-link-lib=dylib=gcc");
+        }
+        
+        // Point to both the libyuv directory and the include subdirectory
+        // This allows includes like "libyuv.h" and "libyuv/basic_types.h" to work correctly
+        let normalized_path = abs_library_dir.display().to_string().replace("\\", "/");
+        extra_includes_str = format!("-I{} -I{}/include", normalized_path, normalized_path);
+        
+        // Print detailed path information for debugging
+        println!("cargo:warning=abs_library_dir: {}", abs_library_dir.display());
+        println!("cargo:warning=Normalized path: {}", normalized_path);
+        println!("cargo:warning=Formatted extra_includes_str: {}", extra_includes_str);
+        
         custom_error = None;
     } else {
         // Local library was not found. Look for a system library.
@@ -99,12 +111,26 @@ fn main() -> Result<(), String> {
     let header_file = PathBuf::from(&project_root).join("wrapper.h");
     let outdir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let outfile = PathBuf::from(&outdir).join("libyuv_bindgen.rs");
+    
+    // Print debug information
+    println!("cargo:warning=Library file exists: {}", Path::new(&library_file).exists());
+    println!("cargo:warning=Extra includes: {}", extra_includes_str);
+    println!("cargo:warning=Header file: {:?}", header_file);
+    
+    // Split the extra_includes_str into separate arguments for bindgen
+    let include_args: Vec<&str> = extra_includes_str.split_whitespace().collect();
     let mut bindings = bindgen::Builder::default()
         .header(header_file.into_os_string().into_string().unwrap())
-        .clang_arg(extra_includes_str)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .layout_tests(false)
         .generate_comments(false);
+    
+    // Add each include path separately
+    for arg in &include_args {
+        bindings = bindings.clang_arg((*arg).to_string());
+    }
+    
+    println!("cargo:warning=Using separate clang args: {:?}", include_args);
     let allowlist_items = &[
         "ABGRToI420",
         "ABGRToJ400",

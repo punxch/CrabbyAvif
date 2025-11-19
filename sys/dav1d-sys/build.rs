@@ -55,6 +55,14 @@ fn main() -> Result<(), String> {
     if Path::new(&library_file).exists() {
         println!("cargo:rustc-link-search={}", abs_object_dir.display());
         println!("cargo:rustc-link-lib=static=dav1d");
+        
+        // On Windows, we may need to link against additional libraries
+        if cfg!(target_os = "windows") {
+            println!("cargo:rustc-link-lib=dylib=msvcrt");
+            println!("cargo:rustc-link-lib=dylib=mingw32");
+            println!("cargo:rustc-link-lib=dylib=gcc");
+        }
+        
         let version_dir = PathBuf::from(&abs_library_dir)
             .join(build_dir)
             .join("include")
