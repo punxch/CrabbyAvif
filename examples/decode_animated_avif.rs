@@ -57,13 +57,36 @@ fn decode_with_crabbyavif(path: &str) -> Result<(), Box<dyn std::error::Error>> 
     let frame_count = decoder.image_count();
     let is_animated = frame_count > 1;
     
+    // Print general information
+    let image = decoder.image().unwrap();
+    let width = image.width;
+    let height = image.height;
+    println!("  Dimensions: {}x{}", width, height);
+    
+    // Show timing information if available
+    if decoder.timescale() > 0 {
+        println!("  Timescale: {}", decoder.timescale());
+        println!("  Duration: {:.3} seconds", decoder.duration());
+    }
+    
     if is_animated {
         println!("Detected animated AVIF with {} frames", frame_count);
+        
+        // Calculate average frame rate
+        if decoder.timescale() > 0 && decoder.duration() > 0.0 {
+            let avg_fps = frame_count as f64 / decoder.duration();
+            println!("  Average frame rate: {:.2} FPS", avg_fps);
+        }
         
         // Decode each frame
         for i in 0..frame_count {
             // Advance to the next frame
             decoder.nth_image(i)?;
+            
+            // Get timing information for this frame
+            let timing = decoder.nth_image_timing(i)?;
+            let frame_duration = timing.duration;
+            let frame_rate = if frame_duration > 0.0 { 1.0 / frame_duration } else { 0.0 };
             
             // Get the image data
             let image = decoder.image().unwrap();
@@ -85,7 +108,8 @@ fn decode_with_crabbyavif(path: &str) -> Result<(), Box<dyn std::error::Error>> 
                 None => return Err("No pixel data found".into()),
             };
             
-            println!("  Frame {}: {}x{}", i, width, height);
+            println!("  Frame {}: {}x{} | Duration: {:.3}s | Rate: {:.2} FPS", 
+                     i, width, height, frame_duration, frame_rate);
             
             // Convert to image::DynamicImage
             let img = image::RgbImage::from_raw(width, height, data)
