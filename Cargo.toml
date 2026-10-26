@@ -77,6 +77,7 @@ cbindgen = "0.26.0"
 [features]
 default = ["dav1d", "libyuv", "png", "jpeg", "gif", "sharpyuv"]
 cli = ["dep:clap", "dep:clap_derive"]
+# default = ["dav1d", "png", "jpeg", "gif"]
 capi = []
 dav1d = ["dep:dav1d-sys"]
 libyuv = ["dep:libyuv-sys"]
