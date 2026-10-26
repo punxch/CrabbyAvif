@@ -56,16 +56,16 @@ fn main() -> Result<(), String> {
     if Path::new(&library_file).exists() {
         println!("cargo:rustc-link-lib=static=sharpyuv");
         println!("cargo:rustc-link-search={}", abs_object_dir.display());
-        
+
         // On Windows with MSVC toolchain, we may need to link against additional libraries
         if cfg!(target_os = "windows") && cfg!(target_env = "msvc") {
             println!("cargo:rustc-link-lib=dylib=msvcrt");
         }
-        
+
         // Include both the libwebp directory and the sharpyuv subdirectory
         include_paths.push(format!("-I{}", abs_library_dir.display()));
         include_paths.push(format!("-I{}/sharpyuv", abs_library_dir.display()));
-        
+
         // Print debug information
         println!("cargo:warning=Library file exists: {}", Path::new(&library_file).exists());
         println!("cargo:warning=Include paths: {:?}", include_paths);
