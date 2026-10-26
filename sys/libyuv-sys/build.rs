@@ -52,18 +52,24 @@ fn main() -> Result<(), String> {
     let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let abs_library_dir = PathBuf::from(&project_root).join("libyuv");
     let abs_object_dir = PathBuf::from(&abs_library_dir).join(build_dir);
-    let library_file = PathBuf::from(&abs_object_dir).join("libyuv.a");
+    // Use yuv.lib for MSVC toolchain on Windows, libyuv.a for other platforms
+    let library_filename = if cfg!(target_os = "windows") && cfg!(target_env = "msvc") {
+        "yuv.lib"
+    } else {
+        "libyuv.a"
+    };
+    let library_file = PathBuf::from(&abs_object_dir).join(library_filename);
     let extra_includes_str;
     let custom_error;
     if Path::new(&library_file).exists() {
-        println!("cargo:rustc-link-lib=static=yuv");
+        // Use yuv for MSVC toolchain on Windows, yuv for other platforms (same name, different extensions)
+        let library_name = "yuv";
+        println!("cargo:rustc-link-lib=static={}", library_name);
         println!("cargo:rustc-link-search={}", abs_object_dir.display());
         
-        // On Windows, we may need to link against additional libraries
-        if cfg!(target_os = "windows") {
+        // On Windows with MSVC toolchain, we may need to link against additional libraries
+        if cfg!(target_os = "windows") && cfg!(target_env = "msvc") {
             println!("cargo:rustc-link-lib=dylib=msvcrt");
-            println!("cargo:rustc-link-lib=dylib=mingw32");
-            println!("cargo:rustc-link-lib=dylib=gcc");
         }
         
         // Point to both the libyuv directory and the include subdirectory

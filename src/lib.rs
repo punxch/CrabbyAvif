@@ -369,6 +369,8 @@ pub enum AvifError {
     InvalidToneMappedImage(String),
 }
 
+impl std::error::Error for AvifError {}
+
 pub type AvifResult<T> = Result<T, AvifError>;
 
 #[repr(i32)]
@@ -584,4 +586,76 @@ pub fn codec_versions() -> String {
         codecs::libjxl::Libjxl::version(),
     ];
     versions.join(", ")
+}
+
+/// Represents a decoded AVIF image
+#[derive(Debug)]
+pub struct AvifImage {
+    /// The raw pixel data
+    pub data: Vec<u8>,
+    /// Width of the image
+    pub width: u32,
+    /// Height of the image
+    pub height: u32,
+    /// Number of bytes per pixel
+    pub bytes_per_pixel: usize,
+}
+
+/// Decode AVIF image from buffer
+pub fn decode(buffer: &[u8]) -> Result<AvifImage, AvifError> {
+    let mut decoder = decoder::Decoder::default();
+    decoder.set_io_vec(buffer.to_vec());
+    decoder.parse()?;
+
+    // Get the first image
+    decoder.nth_image(0)?;
+
+    if let Some(image) = decoder.image() {
+        // Convert to RGB format
+        let width = image.width;
+        let height = image.height;
+
+        // Create a new RGB image
+        let mut rgb_image = reformat::rgb::Image {
+            width,
+            height,
+            depth: 8,
+            format: reformat::rgb::Format::Rgb,
+            chroma_upsampling: reformat::rgb::ChromaUpsampling::Automatic,
+            chroma_downsampling: reformat::rgb::ChromaDownsampling::Automatic,
+            premultiply_alpha: false,
+            is_float: false,
+            max_threads: 1,
+            pixels: None,
+            row_bytes: 0,
+        };
+
+        // Allocate memory for the RGB image
+        rgb_image.allocate()?;
+
+        // Convert YUV to RGB
+        reformat::rgb_impl::yuv_to_rgb_any(
+            image,
+            &mut rgb_image,
+            reformat::rgb::AlphaMultiplyMode::NoOp,
+        )?;
+
+        // Extract the pixel data
+        let data = match rgb_image.pixels {
+            Some(pixels) => match pixels {
+                utils::pixels::Pixels::Buffer(buffer) => buffer,
+                _ => return Err(AvifError::ReformatFailed),
+            },
+            None => return Err(AvifError::NoContent),
+        };
+
+        Ok(AvifImage {
+            data,
+            width,
+            height,
+            bytes_per_pixel: 3,
+        })
+    } else {
+        Err(AvifError::NoContent)
+    }
 }
