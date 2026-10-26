@@ -161,6 +161,7 @@ fn codec_choice_parser(s: &str) -> Result<CodecChoice, String> {
         "aom" | "libaom" => Ok(CodecChoice::Aom),
         "mediacodec" => Ok(CodecChoice::MediaCodec),
         "dav1d" => Ok(CodecChoice::Dav1d),
+        "rav1d" => Ok(CodecChoice::Rav1d),
         "gav1" | "libgav1" => Ok(CodecChoice::Libgav1),
         #[cfg(feature = "jpegxl")]
         "hxl" | "jxl" | "jpegxl" | "libjxl" => Ok(CodecChoice::Libjxl),

@@ -285,6 +285,7 @@ pub enum avifCodecChoice {
     Rav1e = 4,
     Svt = 5,
     Avm = 6,
+    Rav1d = 7, // CrabbyAvif extension; existing libavif values are unchanged.
 }
 
 impl avifCodecChoice {
@@ -294,6 +295,8 @@ impl avifCodecChoice {
             (Self::Aom, "aom"),
             #[cfg(feature = "dav1d")]
             (Self::Dav1d, "dav1d"),
+            #[cfg(feature = "rav1d")]
+            (Self::Rav1d, "rav1d"),
         ];
         for available_codec in available_codecs {
             if name == available_codec.1 {
@@ -327,10 +330,12 @@ pub unsafe extern "C" fn crabby_avifCodecName(
     _choice: avifCodecChoice,
     requiredFlags: avifCodecFlags,
 ) -> *const c_char {
-    // This function will just return "dav1d" or "aom" based on whether encoder or decoder is being
+    // This function returns the enabled software decoder or "aom" based on which is being
     // queried. It simply exists for compatibility with libavif.
     CStr::from_bytes_with_nul(if (requiredFlags & avifCodecFlag::CanEncode as u32) != 0 {
         b"aom\0"
+    } else if cfg!(feature = "rav1d") {
+        b"rav1d\0"
     } else {
         b"dav1d\0"
     })

@@ -26,10 +26,10 @@ jobs:
     - run: cargo clippy --version
     - run: cargo clippy --no-default-features
     - run: cargo clippy --no-default-features --features=capi
-    - run: cargo clippy
-    - run: cargo clippy --tests
-    - run: cargo clippy --examples
-    - run: cargo clippy --features aom
-    - run: cargo clippy --features aom,capi
-    - run: cargo clippy --features aom --tests
-    - run: cargo clippy --features aom --examples
+    - run: cargo clippy --no-default-features --features native
+    - run: cargo clippy --no-default-features --features native --tests
+    - run: cargo clippy --no-default-features --features native --examples
+    - run: cargo clippy --no-default-features --features native,aom
+    - run: cargo clippy --no-default-features --features native,aom,capi
+    - run: cargo clippy --no-default-features --features native,aom --tests
+    - run: cargo clippy --no-default-features --features native,aom --examples

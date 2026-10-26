@@ -15,6 +15,9 @@
 #[cfg(feature = "dav1d")]
 pub mod dav1d;
 
+#[cfg(feature = "rav1d")]
+pub mod rav1d;
+
 #[cfg(feature = "android_mediacodec")]
 pub mod android_mediacodec;
 

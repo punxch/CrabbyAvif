@@ -34,4 +34,4 @@ jobs:
         run: cargo test --no-default-features --features cli
 
       - name: Build and run CLI tests
-        run: cargo test --features libyuv,aom,sharpyuv,cli
+        run: cargo test --no-default-features --features native,aom,cli

@@ -17,6 +17,11 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
 libc = { version = "0.2.152" }
+# Keep both bit depths, but never enable rav1d's external assembly build.
+rav1d = { version = "=1.1.0", default-features = false, features = [
+  "bitdepth_8",
+  "bitdepth_16",
+], optional = true }
 
 # The dependencies below are also workspace members in order to include their
 # custom wrappers (lib.rs) in this project. However, even if their respective
@@ -71,14 +76,15 @@ tempfile = "3.8.1"
 rand = "0.10.1"
 
 [build-dependencies]
-bindgen = "0.69.1"
-cbindgen = "0.26.0"
+cbindgen = { version = "0.26.0", optional = true }
 
 [features]
-default = ["dav1d", "libyuv", "png", "jpeg", "gif", "sharpyuv"]
+default = ["rav1d"]
+# The previous native configuration, for callers that install its system libraries.
+native = ["dav1d", "libyuv", "png", "jpeg", "gif", "sharpyuv"]
 cli = ["dep:clap", "dep:clap_derive"]
-# default = ["dav1d", "png", "jpeg", "gif"]
-capi = []
+capi = ["dep:cbindgen"]
+rav1d = ["dep:rav1d"]
 dav1d = ["dep:dav1d-sys"]
 libyuv = ["dep:libyuv-sys"]
 android_mediacodec = ["dep:ndk-sys"]
@@ -116,3 +122,16 @@ disallowed_macros = "deny"
 [[bin]]
 name = "crabbyavif"
 required-features = ["cli"]
+
+# These examples use the optional image dependency.
+[[example]]
+name = "simple_decode"
+required-features = ["jpeg"]
+
+[[example]]
+name = "decode_animated_avif"
+required-features = ["jpeg"]
+
+[profile.release-windows]
+inherits = "release"
+panic = "unwind"

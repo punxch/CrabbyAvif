@@ -16,6 +16,8 @@
 pub mod libyuv;
 #[cfg(feature = "libyuv")]
 pub mod scale;
+#[cfg(not(feature = "libyuv"))]
+mod scale_rust;
 #[cfg(feature = "sharpyuv")]
 pub mod sharpyuv;
 
@@ -50,20 +52,6 @@ pub mod libyuv {
         _scale: f32,
     ) -> AvifResult<Option<()>> {
         Ok(None) // Not implemented.
-    }
-
-    impl image::Image {
-        pub(crate) fn scale(
-            &mut self,
-            width: u32,
-            height: u32,
-            _category: Category,
-        ) -> AvifResult<()> {
-            if self.width == width && self.height == height {
-                return Ok(());
-            }
-            AvifError::not_implemented()
-        }
     }
 }
 

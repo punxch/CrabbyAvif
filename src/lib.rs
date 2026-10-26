@@ -23,6 +23,10 @@
 #![deny(clippy::disallowed_methods, clippy::disallowed_macros)]
 #![cfg_attr(test, allow(clippy::disallowed_methods, clippy::disallowed_macros))]
 
+// Both libraries export dav1d_* symbols, but their Rust-facing ABIs differ.
+#[cfg(all(feature = "rav1d", feature = "dav1d"))]
+compile_error!("rav1d and dav1d cannot be linked together; use --no-default-features --features dav1d (or native) for the native backend");
+
 #[macro_use]
 mod internal_utils;
 
@@ -67,7 +71,8 @@ pub enum CodecChoice {
     Avm, // AVIF2 (future AV2-HEIF) encoder and decoder. WARNING: experimental.
     MediaCodec, // AVIF (AV1-HEIF) and HEIC (HEVC-HEIF) decoder on Android.
     Dav1d, // AVIF (AV1-HEIF) decoder.
-    Libgav1, // AVIF (AV1-HEIF) decoder.
+    Rav1d, // AVIF (AV1-HEIF) decoder implemented in Rust without external assembly.
+    Libgav1, // Reserved; no decoder implementation.
     #[cfg(feature = "jpegxl")]
     Libjxl, // JPEG XL-HEIF encoder and decoder. WARNING: experimental.
 }
@@ -580,6 +585,8 @@ pub fn codec_versions() -> String {
         "android_mediacodec".into(),
         #[cfg(feature = "dav1d")]
         codecs::dav1d::Dav1d::version(),
+        #[cfg(feature = "rav1d")]
+        codecs::rav1d::Rav1d::version(),
         #[cfg(feature = "avm")]
         codecs::avm::Avm::version(),
         #[cfg(feature = "jpegxl")]
@@ -604,7 +611,8 @@ pub struct AvifImage {
 /// Decode AVIF image from buffer
 pub fn decode(buffer: &[u8]) -> Result<AvifImage, AvifError> {
     let mut decoder = decoder::Decoder::default();
-    decoder.set_io_vec(buffer.to_vec());
+    use internal_utils::SliceExtension;
+    decoder.set_io_vec(buffer.try_to_vec()?);
     decoder.parse()?;
 
     // Get the first image

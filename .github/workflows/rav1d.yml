@@ -1,0 +1,38 @@
+name: Portable rav1d
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  portable:
+    name: "rav1d without native dependencies on ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup default stable
+      - name: Reject assembly or native AVIF dependencies
+        run: python scripts/check-portable-deps.py
+      - name: Build with the same Cargo command on each OS
+        run: cargo build --profile release-windows --locked
+      - name: Run bundled tests (external conformance corpus is opt-in)
+        run: cargo test --profile release-windows --locked -- --skip test_conformance
+      - name: Check parser-only builds
+        run: cargo check --no-default-features --locked
+      - name: Check C API and CLI with the Rust decoder
+        run: cargo check --features capi,cli --locked
+      - name: Lint the default library and tests
+        run: cargo clippy --locked --lib --tests

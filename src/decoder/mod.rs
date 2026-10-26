@@ -32,6 +32,9 @@ use crate::decoder::track::*;
 #[cfg(feature = "dav1d")]
 use crate::codecs::dav1d::Dav1d;
 
+#[cfg(feature = "rav1d")]
+use crate::codecs::rav1d::Rav1d;
+
 #[cfg(feature = "android_mediacodec")]
 use crate::codecs::android_mediacodec::MediaCodec;
 
@@ -96,6 +99,10 @@ impl CodecChoice {
                 #[cfg(feature = "dav1d")]
                 if matches!(self, CodecChoice::Auto | CodecChoice::Dav1d) {
                     return Some(Box::<Dav1d>::default());
+                }
+                #[cfg(feature = "rav1d")]
+                if matches!(self, CodecChoice::Auto | CodecChoice::Rav1d) {
+                    return Some(Box::<Rav1d>::default());
                 }
                 None
             }
@@ -2260,7 +2267,7 @@ impl Decoder {
         // Has to be a grid.
         self.tile_info[decoding_item.usize()].is_grid()
             // Has to be one of the supported codecs.
-            && matches!(codec, CodecChoice::MediaCodec | CodecChoice::Dav1d)
+            && matches!(codec, CodecChoice::MediaCodec | CodecChoice::Dav1d | CodecChoice::Rav1d)
             // All the tiles must use the same codec instance.
             && self.tiles[decoding_item.usize()][1..]
                 .iter()
@@ -2270,7 +2277,7 @@ impl Decoder {
     fn can_use_decode_until(&self) -> bool {
         self.image.image_sequence_track_present
             && self.source == Source::Tracks
-            && cfg!(feature = "dav1d")
+            && cfg!(any(feature = "dav1d", feature = "rav1d"))
     }
 
     fn decode_tiles(&mut self, image_index: usize) -> AvifResult<()> {
