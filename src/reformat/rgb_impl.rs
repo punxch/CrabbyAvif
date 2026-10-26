@@ -563,18 +563,18 @@ fn unorm_lookup_tables(
     mode: Mode,
 ) -> AvifResult<(Vec<f32>, Option<Vec<f32>>)> {
     let count = 1usize << image.depth;
-    let mut table_y: Vec<f32> = create_vec_exact(count)?;
+    let mut table_y: Vec<f32> = try_vec_exact![0.0; count]?;
     let (bias_y, range_y) = bias_and_range_y(image);
-    for cp in 0..count {
-        table_y.try_push(((cp as f32) - bias_y) / range_y)?;
+    for (cp, value) in table_y.iter_mut().enumerate() {
+        *value = ((cp as f32) - bias_y) / range_y;
     }
     if mode == Mode::Identity {
         Ok((table_y, None))
     } else {
         let (bias_uv, range_uv) = bias_and_range_uv(image);
-        let mut table_uv: Vec<f32> = create_vec_exact(count)?;
-        for cp in 0..count {
-            table_uv.try_push(((cp as f32) - bias_uv) / range_uv)?;
+        let mut table_uv: Vec<f32> = try_vec_exact![0.0; count]?;
+        for (cp, value) in table_uv.iter_mut().enumerate() {
+            *value = ((cp as f32) - bias_uv) / range_uv;
         }
         Ok((table_y, Some(table_uv)))
     }
@@ -970,6 +970,93 @@ fn yuv8_to_rgb_any(
     Ok(())
 }
 
+// Specialize the common display path so output depth, channel layout, matrix mode,
+// and alpha multiplication do not need to be dispatched in the pixel loop. Keep
+// the arithmetic order identical to the generic converter (including rounding).
+fn yuv16_to_rgba8_bilinear(
+    image: &image::Image,
+    rgb: &mut rgb::Image,
+    coefficients: (f32, f32, f32),
+) -> AvifResult<()> {
+    let (kr, kg, kb) = coefficients;
+    let (table_y, table_uv) = unorm_lookup_tables(image, Mode::YuvCoefficients(kr, kg, kb))?;
+    let table_uv = table_uv.as_ref().unwrap();
+    let max_channel = image.max_channel() as usize;
+    let width = image.width as usize;
+    let uv_width = image.width(Plane::U);
+    let shift_y = image.yuv_format.chroma_shift_y();
+    for j in 0..image.height {
+        let uv_j = j >> shift_y;
+        let uv_adj_j = if shift_y == 0 || j == 0 || (j == image.height - 1 && j % 2 != 0) {
+            uv_j
+        } else if j % 2 != 0 {
+            uv_j + 1
+        } else {
+            uv_j - 1
+        };
+        let y = &image.row16(Plane::Y, j)?[..width];
+        let u = &image.row16(Plane::U, uv_j)?[..uv_width];
+        let v = &image.row16(Plane::V, uv_j)?[..uv_width];
+        let u_adj = &image.row16(Plane::U, uv_adj_j)?[..uv_width];
+        let v_adj = &image.row16(Plane::V, uv_adj_j)?[..uv_width];
+        let dst = &mut rgb.row_mut(j)?[..width * 4];
+        for start in (0..width).step_by(4) {
+            // Overlap the last block when the width is not divisible by four.
+            // Recomputing up to three pixels keeps every arithmetic batch full.
+            let start = start.min(width - 4);
+            let pixels = &mut dst[start * 4..(start + 4) * 4];
+            let mut ys = [0.0; 4];
+            let mut cbs = [0.0; 4];
+            let mut crs = [0.0; 4];
+            for lane in 0..4 {
+                let i = start + lane;
+                let uv_i = i >> 1;
+                let uv_adj_i = if i == 0 || (i == width - 1 && i % 2 != 0) {
+                    uv_i
+                } else if i % 2 != 0 {
+                    uv_i + 1
+                } else {
+                    uv_i - 1
+                };
+                let interpolate = |current: &[u16], adjacent: &[u16]| {
+                    let a = table_uv[min(current[uv_i] as usize, max_channel)];
+                    let b = table_uv[min(current[uv_adj_i] as usize, max_channel)];
+                    let c = table_uv[min(adjacent[uv_i] as usize, max_channel)];
+                    let d = table_uv[min(adjacent[uv_adj_i] as usize, max_channel)];
+                    (a * (9.0 / 16.0))
+                        + (b * (3.0 / 16.0))
+                        + (c * (3.0 / 16.0))
+                        + (d * (1.0 / 16.0))
+                };
+                ys[lane] = table_y[min(y[i].into(), max_channel)];
+                cbs[lane] = interpolate(u, u_adj);
+                crs[lane] = interpolate(v, v_adj);
+            }
+            let mut rs = [0u8; 4];
+            let mut gs = [0u8; 4];
+            let mut bs = [0u8; 4];
+            for lane in 0..4 {
+                let y = ys[lane];
+                let cb = cbs[lane];
+                let cr = crs[lane];
+                let r = y + (2.0 * (1.0 - kr)) * cr;
+                let b = y + (2.0 * (1.0 - kb)) * cb;
+                let g = y - ((2.0 * ((kr * (1.0 - kr) * cr) + (kb * (1.0 - kb) * cb))) / kg);
+                rs[lane] = (0.5 + clamp_f32(r, 0.0, 1.0) * 255.0) as u8;
+                gs[lane] = (0.5 + clamp_f32(g, 0.0, 1.0) * 255.0) as u8;
+                bs[lane] = (0.5 + clamp_f32(b, 0.0, 1.0) * 255.0) as u8;
+            }
+            for (lane, pixel) in pixels.chunks_exact_mut(4).enumerate() {
+                pixel[0] = rs[lane];
+                pixel[1] = gs[lane];
+                pixel[2] = bs[lane];
+            }
+            // Alpha has already been imported (or filled as opaque) by the caller.
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn yuv_to_rgb_any(
     image: &image::Image,
     rgb: &mut rgb::Image,
@@ -984,6 +1071,20 @@ pub(crate) fn yuv_to_rgb_any(
         && image.chroma_sample_position != ChromaSamplePosition::CENTER
     {
         return AvifError::not_implemented();
+    }
+    if !fast_or_no_chroma_subsampling
+        && rgb.depth == 8
+        && image.depth > 8
+        && image.width >= 4
+        && rgb.format == Format::Rgba
+        && alpha_multiply_mode == AlphaMultiplyMode::NoOp
+        && matches!(image.yuv_format, PixelFormat::Yuv420 | PixelFormat::Yuv422)
+        && image.has_plane(Plane::U)
+        && image.has_plane(Plane::V)
+    {
+        if let Mode::YuvCoefficients(kr, kg, kb) = image.into() {
+            return yuv16_to_rgba8_bilinear(image, rgb, (kr, kg, kb));
+        }
     }
     if image.depth > 8 {
         yuv16_to_rgb_any(
@@ -1678,6 +1779,104 @@ fn to_unorm(bias_y: f32, range_y: f32, max_channel: u16, v: f32) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test_case::test_matrix(
+        [10, 12],
+        [PixelFormat::Yuv420, PixelFormat::Yuv422],
+        [YuvRange::Full, YuvRange::Limited],
+        [MatrixCoefficients::Bt601, MatrixCoefficients::Bt709,
+         MatrixCoefficients::Bt2020Ncl, MatrixCoefficients::Fcc, MatrixCoefficients::Smpte240]
+    )]
+    fn rgba8_bilinear_matches_generic(
+        depth: u8,
+        yuv_format: PixelFormat,
+        yuv_range: YuvRange,
+        matrix_coefficients: MatrixCoefficients,
+    ) -> AvifResult<()> {
+        use crate::utils::pixels::Pixels;
+
+        for (width, height) in [
+            (1, 1),
+            (3, 1),
+            (4, 1),
+            (5, 3),
+            (7, 8),
+            (8, 7),
+            (17, 13),
+            (48, 35),
+        ] {
+            for has_alpha in [false, true] {
+                let mut image = image::Image {
+                    width,
+                    height,
+                    depth,
+                    yuv_format,
+                    yuv_range,
+                    matrix_coefficients,
+                    ..Default::default()
+                };
+                image.allocate_planes(Category::Color)?;
+                if has_alpha {
+                    image.allocate_planes(Category::Alpha)?;
+                }
+                let max_channel = image.max_channel();
+                // Include black/white, mixed chroma, and out-of-range color samples.
+                // Odd dimensions also exercise the padding in allocated YUV planes.
+                let mut seed = 0x8121a8eeu32;
+                for plane in image::ALL_PLANES {
+                    if !image.has_plane(plane) {
+                        continue;
+                    }
+                    for row in 0..image.height(plane) as u32 {
+                        for sample in image.row16_mut(plane, row)? {
+                            seed ^= seed << 13;
+                            seed ^= seed >> 17;
+                            seed ^= seed << 5;
+                            *sample = match seed & 7 {
+                                0 => 0,
+                                1 => max_channel,
+                                2 if plane != Plane::A => u16::MAX,
+                                _ => seed as u16 & max_channel,
+                            };
+                        }
+                    }
+                }
+                for (mode, reference_mode) in [
+                    (AlphaMultiplyMode::NoOp, AlphaMultiplyMode::NoOp),
+                    (AlphaMultiplyMode::Multiply, AlphaMultiplyMode::Multiply),
+                    (AlphaMultiplyMode::UnMultiply, AlphaMultiplyMode::UnMultiply),
+                ] {
+                    if !has_alpha && mode != AlphaMultiplyMode::NoOp {
+                        continue;
+                    }
+                    let make_output = || -> AvifResult<rgb::Image> {
+                        let mut output = rgb::Image::create_from_yuv(&image);
+                        output.depth = 8;
+                        // Sentinel padding catches writes past the active width and alpha changes.
+                        output.row_bytes = width * 4 + 12;
+                        output.pixels = Some(Pixels::Buffer(vec![
+                            0xa5;
+                            (output.row_bytes * height)
+                                as usize
+                        ]));
+                        if has_alpha {
+                            output.import_alpha_from(&image)?;
+                        } else {
+                            output.set_opaque()?;
+                        }
+                        Ok(output)
+                    };
+                    let mut actual = make_output()?;
+                    let mut expected = make_output()?;
+                    yuv16_to_rgb_any(&image, &mut expected, reference_mode, false)?;
+                    yuv_to_rgb_any(&image, &mut actual, mode)?;
+                    assert_eq!(actual.pixel_slice()?, expected.pixel_slice()?,
+                        "depth={depth}, size={width}x{height}, format={yuv_format:?}, range={yuv_range:?}, matrix={matrix_coefficients:?}, alpha={has_alpha}");
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn yuv_to_rgb() {

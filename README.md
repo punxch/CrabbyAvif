@@ -62,6 +62,51 @@ Do not enable rav1d's `asm` feature elsewhere in the dependency graph: Cargo
 unifies features. `python scripts/check-portable-deps.py` checks this repository's
 default dependency graph in CI.
 
+### Measuring decode performance
+
+The portable path includes a specialized, safe-Rust conversion from 10-/12-bit
+YUV420/422 to RGBA8 with centered bilinear chroma upsampling. It processes four
+pixels at a time, preserving the generic converter's arithmetic and rounding.
+Alpha is preserved; conversions requiring premultiplication, other matrices or
+formats, and widths below four pixels use the generic path. Eight-bit inputs keep
+their existing conversion loop. Lookup tables are allocated once and filled in
+place for all formats. There are no additional dependencies or assembler tools.
+
+Run the benchmark with the same Cargo profile as the consuming application:
+
+```sh
+cargo run --profile release-windows --locked --example bench_decode -- 1 9 foo.avif tests/data/anim.avif tests/data/colors-animated-12bpc-keyframes-0-2-3.avif
+```
+
+Arguments are decoder thread count, measured repetitions, and one or more files.
+Each file gets one unmeasured warmup. CSV columns report per-stage medians for
+in-memory parsing (including the input copy), AV1 decoding, RGBA allocation,
+conversion, the sum of these stages, and the first frame. File I/O, hashing, and
+buffer destruction are excluded from those times. All output bytes and frame
+durations are hashed outside the timed sections; each repetition must match.
+Compare checksums using the same Rust toolchain, as `DefaultHasher` is not a
+stable interchange format.
+
+On Windows x86_64, an i9-12900K, Rust 1.90.0, `release-windows`, one decoder
+thread, and nine measured repetitions, comparison with `a9962e8` gave:
+
+| Input | RGBA conversion before / after | Measured stages before / after |
+| --- | --- | --- |
+| `foo.avif`, 960x540, 10-bit, 30 frames | 124.952 / 103.519 ms (-17.2%) | 473.192 / 455.193 ms (-3.8%) |
+| `colors-animated-12bpc-keyframes-0-2-3.avif`, 64x64, 5 frames | 0.255 / 0.198 ms (-22.4%) | 1.454 / 1.375 ms (-5.4%) |
+| `anim.avif`, 120x120, 8-bit, 150 frames | 14.831 / 14.704 ms | 50.724 / 51.227 ms |
+
+All eight files in the comparison (also including `bar.avif`, the animated alpha
+fixture, `paris_10bpc.avif`, `sofa_grid1x5_420.avif`, and `seine_hdr_srgb.avif`)
+retained identical output/timing checksums. These are local measurements, not a
+cross-platform speed guarantee. AV1 decoding remains the largest cost for the
+large animation; this optimization targets color conversion. Increasing decoder
+threads helped that animation but slowed the small animation, so the default
+thread limit remains one. Applications should benchmark their own workload.
+A separate same-profile comparison with ThinLTO and one codegen unit also retained
+identical checksums and reduced `foo.avif` RGBA conversion time by 16.8%. Profile
+settings themselves are unchanged; consuming applications continue to own them.
+
 ### Optional native configuration
 
 The `native` feature restores the previous default bundle: `dav1d`, `libyuv`,
